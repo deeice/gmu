@@ -65,6 +65,24 @@ static volatile sig_atomic_t signal_received = 0;
 static GmuMedialib     gm;
 #endif
 
+#if 1 // ZIPIT_Z2	
+static void init_sdl(int usetimer)
+{
+#ifndef CORE_WITH_SDL_VIDEO
+  int flags = SDL_INIT_AUDIO;
+#else
+  int flags = SDL_INIT_VIDEO | SDL_INIT_AUDIO;
+#endif
+
+	setenv("SDL_VIDEO_ALLOW_SCREENSAVER", "1", 0);
+  if (usetimer) flags |= SDL_INIT_TIMER;
+  if (SDL_Init(flags) < 0) {
+		wdprintf(V_ERROR, "gmu", "ERROR: Could not initialize SDL: %s\n", SDL_GetError());
+		exit(1);
+	}
+	wdprintf(V_DEBUG, "gmu", "SDL init done.\n");
+}
+#else
 static void init_sdl(void)
 {
 	setenv("SDL_VIDEO_ALLOW_SCREENSAVER", "1", 0);
@@ -78,7 +96,8 @@ static void init_sdl(void)
 	}
 	wdprintf(V_DEBUG, "gmu", "SDL init done.\n");
 }
-
+#endif
+	
 GmuFeatures gmu_core_get_features(void)
 {
 	GmuFeatures features = 0;
@@ -901,9 +920,46 @@ static void print_cmd_help(const char *prog_name)
 
 static void sig_handler(int sig)
 {
+#if 1 // ZIPIT_Z2
+	signal_received = sig;
+#else
 	signal_received = 1;
+#endif
 }
 
+#if 1 // ZIPIT_Z2
+static void gmu_core_info()
+{
+	PB_Status current_file_player_status;
+	FILE *file = fopen("/tmp/gmuinfo", "w");
+	Entry *en;
+	int i,j;
+
+	if (!file)
+		return;
+	current_file_player_status = file_player_get_item_status();
+	fprintf(file, "%s ", 
+		current_file_player_status == PLAYING  ? "PLAYING"  : 
+		current_file_player_status == FINISHED ? "FINISHED" : 
+		current_file_player_status == STOPPED  ? "STOPPED"  : "PAUSED"
+	);
+	if (trackinfo_acquire_lock(&current_track_ti)) {
+		fprintf(file,	"%s\n", trackinfo_get_title(&current_track_ti));
+		trackinfo_release_lock(&current_track_ti);
+	}
+	else
+		fprintf(file,	"???\n");
+	//gmu_core_export_playlist(file);
+	playlist_get_lock(&pl);
+	j = 1 + playlist_get_current_position(&pl);
+	for (i=1, en=playlist_get_first(&pl); en != NULL; i++, en=playlist_get_next(en)) {
+		fprintf(file, "%3d %c %s\n", i, i==j?'*':'-',playlist_get_entry_name(&pl, en));
+	}
+	playlist_release_lock(&pl);
+	fclose(file);
+}
+#endif
+ 
 static void file_extensions_load(void)
 {
 	const char *exts = decloader_get_all_extensions();
@@ -953,7 +1009,16 @@ int main(int argc, char **argv)
 
 	assign_signal_handler(SIGINT, sig_handler);
 	assign_signal_handler(SIGTERM, sig_handler);
-
+#if 1 // ZIPIT_Z2
+	assign_signal_handler(SIGQUIT, sig_handler);
+	assign_signal_handler(SIGUSR1, sig_handler);
+	assign_signal_handler(SIGUSR2, sig_handler);
+	//
+	assign_signal_handler(SIGSYS, sig_handler);
+	assign_signal_handler(SIGURG, sig_handler);
+	assign_signal_handler(SIGPOLL, sig_handler);	
+#endif
+	
 	if (!getcwd(base_dir, 255)) snprintf(base_dir, 255, ".");
 	sys_config_dir = base_dir;
 	config_dir = base_dir;
@@ -1149,8 +1214,24 @@ int main(int argc, char **argv)
 #ifdef GMU_MEDIALIB
 	medialib_open(&gm);
 #endif
+#if 1 // ZIPIT_Z2	
+#if STATIC
+	i = -1; // Assume static load might include SDL front end.
+#else
+	if (frontend_plugin_by_cmd_arg_counter <= 0)
+		i = -1;
+	else {
+		for (i = frontend_plugin_by_cmd_arg_counter; i > 0; i--)
+			if (strstr(frontend_plugin_by_cmd_arg[i-1],"sdl"))
+				break;
+	}
+#endif
+	wdprintf(V_DEBUG, "gmu", "init_sdl(%d).\n", i);
+	init_sdl(i); /* Initialize SDL audio */
+#else
 	init_sdl(); /* Initialize SDL audio */
-
+#endif
+	
 	/* Load frontends */
 	snprintf(temp, 511, "%s/frontends", base_dir);
 	wdprintf(V_DEBUG, "gmu", "Searching for frontends in %s.\n", temp);
@@ -1177,11 +1258,18 @@ int main(int argc, char **argv)
 
 	if (cfg_get_boolean_value(config, "Gmu.AutoPlayOnProgramStart")) {
 		global_command = NEXT;
+		player_status = PLAYING; // Zipit Z2
 	}
 
 	if (cfg_get_boolean_value(config, "Gmu.ResumePlayback")) {
 		int item    = cfg_get_int_value(config, "Gmu.LastPlayedPlaylistItem");
 		int seekpos = cfg_get_int_value(config, "Gmu.LastPlayedPlaylistItemTime");
+#if 1 // ZIPIT_Z2	
+		if (alt_playlist)	{ // Play from at beginning of cmdline playlist.
+			item = 1;
+			seekpos = 0;
+		}
+#endif
 		if (item > 0) {
 			global_command = NO_CMD;
 			file_player_seek(seekpos);
@@ -1196,10 +1284,51 @@ int main(int argc, char **argv)
 	while (gmu_is_running() || event_queue_is_event_waiting(&event_queue)) {
 		GmuFrontend *fe = NULL;
 
+#if 1 // ZIPIT_Z2
+		if (signal_received) {
+			if (signal_received == SIGQUIT ) gmu_core_play_pause();
+			else if (signal_received == SIGUSR1 ) gmu_core_previous();
+			else if (signal_received == SIGUSR2 ) gmu_core_next();
+			else if (signal_received == SIGSYS ) {
+				wdprintf(V_DEBUG, "gmu", "SIGSYS\n");
+				gmu_core_info();
+			}
+			else if (signal_received == SIGURG ) wdprintf(V_DEBUG, "gmu", "SIGURG\n");
+			else if (signal_received == SIGPOLL ) wdprintf(V_DEBUG, "gmu", "SIGPOLL\n");
+			else gmu_core_quit();
+			signal_received = 0;
+		}
+#else
 		if (signal_received) gmu_core_quit();
+#endif
 
-		if (global_command == NO_CMD)
+		switch (global_command) {
+			case NO_CMD:
+			//				wdprintf(V_DEBUG, "gmu", "NO_CMD\n");
+				break;
+			case PLAY:
+				wdprintf(V_DEBUG, "gmu", "PLAY\n"); break;
+			case PAUSE:
+				wdprintf(V_DEBUG, "gmu", "PAUSE\n"); break;
+			case STOP:
+				wdprintf(V_DEBUG, "gmu", "STOP\n"); break;
+			case NEXT:
+				wdprintf(V_DEBUG, "gmu", "NEXT\n"); break;
+			case PREVIOUS:
+				wdprintf(V_DEBUG, "gmu", "PREV\n"); break;
+			case PLAY_ITEM:
+				wdprintf(V_DEBUG, "gmu", "ITEM\n"); break;
+			case PLAY_FILE:
+				wdprintf(V_DEBUG, "gmu", "FILE\n"); break;
+			default:
+				wdprintf(V_DEBUG, "gmu", "%d\n", global_command); // Zipit Z2
+				break;
+		}
+		
+		if (global_command == NO_CMD){
 			event_queue_wait_for_event(&event_queue, 500);
+			//SDL_Delay(20); // Zipit Z2
+		}
 		if (global_command == PLAY_ITEM && global_param >= 0) {
 			Entry *tmp_item;
 			int    fade_out_on_skip = check_fade_out_on_skip();
@@ -1236,6 +1365,11 @@ int main(int argc, char **argv)
 			global_filename[0] = '\0';
 			global_command = NO_CMD;
 			global_param = 0;
+		}
+		else if (global_command == NEXT) {
+			wdprintf(V_DEBUG, "gmu", "next\n");
+			event_queue_wait_for_event(&event_queue, 500);
+			//SDL_Delay(500); // Zipit Z2
 		}
 
 		if (trackinfo_acquire_lock(&current_track_ti)) {
@@ -1318,6 +1452,11 @@ int main(int argc, char **argv)
 		file_player_playback_get_time()
 	);
 
+#if 1 // ZIPIT_Z2	
+	if (alt_playlist){
+		wdprintf(V_INFO, "gmu", "Not saving alt playlist item\n");
+	}	else
+#endif
 	if (file_player_get_item_status() == PLAYING) {
 		unsigned int item_time = file_player_playback_get_time() / 1000;
 		snprintf(temp, 10, "%d", gmu_core_playlist_get_current_position()+1);
@@ -1346,6 +1485,12 @@ int main(int argc, char **argv)
 	    strncmp(cfg_get_key_value(config, "Gmu.VolumeControl"), "Software+Hardware", 17) == 0)
 		hw_close_mixer();
 
+#if 1 // ZIPIT_Z2	
+	if (alt_playlist) { /* Load user playlist if it has been specified with the -l cmd option */
+		wdprintf(V_INFO, "gmu", "Not Saving Alt playlist %s\n", alt_playlist);
+	}
+	else
+#endif
 	if (cfg_get_boolean_value(config, "Gmu.RememberLastPlaylist")) {
 		char *playlist_m3u;
 		gmu_core_config_release_lock();
