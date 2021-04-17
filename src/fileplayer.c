@@ -240,6 +240,22 @@ static int update_metadata(GmuDecoder *gd, TrackInfo *ti, GmuCharset charset)
 
 			if (!strncpy_charset_conv(ti_tmp.title, filename_without_path, SIZE_TITLE-1, 0, M_CHARSET_AUTODETECT))
 				ti_tmp.title[0] = '\0';
+
+#if 1 //ZIPIT_Z2
+			// Change %20 in title to spaces if filename starts with "http://"...
+			if (strncasecmp(ti_tmp.file_name, "http://", 7) == 0) {
+				char *s, *p;
+				if ((p = strrchr(ti_tmp.title,'.'))) // And strip off the extension...
+					*p = 0;
+				s = ti_tmp.title;
+				for (s=strstr(ti_tmp.title, "%20"); s; s=strstr(s, "%20")){
+					*s++ = ' ';
+					for (p = s; *(p+2); p++)
+						*p = *(p+2);
+					*p = 0;
+				}
+			}
+#endif
 		}
 
 		/* Check if new dataset differs from old dataset: */
