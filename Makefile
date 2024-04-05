@@ -104,21 +104,26 @@ DISTBIN_DEPS?=default_distbin
 
 TEMP_HEADER_FILES=tmp-felist.h tmp-declist.h
 
+.PHONY: all
 all: $(DECODERS) $(FRONTENDS) $(TOOLS_TO_BUILD)
 	@echo "All done for target \033[1m$(TARGET)\033[0m. \033[1m$(BINARY)\033[0m binary, \033[1mfrontends\033[0m and \033[1mdecoders\033[0m ready."
 
 config.mk:
 	$(error ERROR: Please run the configure script first)
 
+.PHONY: decoders
 decoders: $(DECODERS_TO_BUILD)
 	@echo "All \033[1mdecoders\033[0m have been built."
 
+.PHONY: frontends
 frontends: $(FRONTENDS_TO_BUILD)
 	@echo "All \033[1mfrontends\033[0m have been built."
 
+.PHONY: frontendsdis
 frontendsdir:
 	$(Q)-mkdir -p frontends
 
+.PHONY: decodersdir
 decodersdir:
 	$(Q)-mkdir -p decoders
 
@@ -144,6 +149,7 @@ projname=gmu-${ver}
 	@echo "Compiling \033[1m$<\033[0m"
 	$(Q)$(CC) -fPIC $(CFLAGS) -Isrc/ -c -o $@ $< -DGMU_REGISTER_FRONTEND=$(FRONTEND_PLUGIN_LOADER_FUNCTION)
 
+.PHONY: dist
 dist: $(ALLFILES)
 	@echo "Creating \033[1m$(projname).tar.gz\033[0m"
 	$(Q)-rm -rf $(projname)
@@ -154,8 +160,10 @@ dist: $(ALLFILES)
 	$(Q)tar chfz $(projname).tar.gz $(projname)
 	$(Q)-rm -rf $(projname)
 
+.PHONY: distbin
 distbin: $(DISTBIN_DEPS)
 
+.PHONY: default_distbin
 default_distbin: $(DISTFILES)
 	@echo "Creating \033[1m$(projname)-$(TARGET).zip\033[0m"
 	$(Q)-rm -rf $(projname)-$(TARGET)
@@ -170,6 +178,7 @@ default_distbin: $(DISTFILES)
 	$(Q)zip -r $(projname)-$(TARGET).zip $(projname)-$(TARGET)
 	$(Q)-rm -rf $(projname)-$(TARGET)
 
+.PHONY: install
 install: $(DISTFILES)
 	@echo "Installing Gmu: prefix=$(PREFIX) destdir=$(DESTDIR)"
 	$(Q)-mkdir -p $(DESTDIR)$(PREFIX)/bin
@@ -196,6 +205,7 @@ install: $(DISTFILES)
 	$(Q)-mkdir -p $(DESTDIR)$(PREFIX)/share/pixmaps
 	$(Q)cp gmu.png $(DESTDIR)$(PREFIX)/share/pixmaps/gmu.png
 
+.PHONY: clean
 clean:
 	$(Q)-rm -rf *.o $(BINARY) gmuc decoders/*.so decoders/*.o frontends/*.so frontends/*.o
 	$(Q)-rm -f $(TEMP_HEADER_FILES)
