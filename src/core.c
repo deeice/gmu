@@ -1001,6 +1001,7 @@ static void file_extensions_free(void)
 }
 
 #define MAX_FRONTEND_PLUGIN_BY_CMD_ARG 16
+#define MAX_CMDLINE_SONGS (256)
 
 int main(int argc, char **argv)
 {
@@ -1017,6 +1018,10 @@ int main(int argc, char **argv)
 	size_t       frontend_plugin_by_cmd_arg_counter = 0;
 	int          pb_time = -1;
 	char        *alt_playlist = NULL;
+	/* Up to 255 songs can be passed directly via the command line */
+	char        *cmdline_songs[MAX_CMDLINE_SONGS];
+	unsigned int cmdline_song_counter = 0;
+
 
 	for (i = 0; i < MAX_FRONTEND_PLUGIN_BY_CMD_ARG; i++)
 		frontend_plugin_by_cmd_arg[i] = NULL;
@@ -1131,8 +1136,8 @@ int main(int argc, char **argv)
 					exit(0);
 					break;
 			}
-		} else {
-			/*printf("FILE:%s (index: %d)\n", argv[i], i);*/
+		} else if (cmdline_song_counter < MAX_CMDLINE_SONGS) {
+			cmdline_songs[cmdline_song_counter++] = argv[i];
 		}
 	}
 
@@ -1239,6 +1244,14 @@ int main(int argc, char **argv)
 			free(playlist_m3u);
 		} else {
 			wdprintf(V_ERROR, "gmu", "ERROR: Unable to load playlist. Failed to create path.\n");
+		}
+	}
+	/* If songs have been passed via the command line, add them to the playlist here */
+	if (cmdline_song_counter > 0) {
+		int i;
+		for (i = 0; i < cmdline_song_counter; i++) {
+			wdprintf(V_INFO, "gmu", "Adding file to playlist: %s\n", cmdline_songs[i]);
+			playlist_add_file(&pl, cmdline_songs[i], NULL);
 		}
 	}
 	wdprintf(V_INFO, "gmu", "Playlist length: %d items\n", playlist_get_length(&pl));
