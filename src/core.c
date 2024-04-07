@@ -1,7 +1,7 @@
 /* 
  * Gmu Music Player
  *
- * Copyright (c) 2006-2023 Johannes Heimansberg (wej.k.vu)
+ * Copyright (c) 2006-2024 Johannes Heimansberg (wej.k.vu)
  *
  * File: core.c  Created: 081115
  *
@@ -1038,10 +1038,21 @@ int main(int argc, char **argv)
 	sys_config_dir = base_dir;
 	config_dir = base_dir;
 
-	/* Store the entire command line as a string */
+	/* Store the (entire) command line as a string up to CMDLINE_MAX
+	 * characters. This is used as information to the user in the UI. */
 	for (i = 0; i < argc; i++) {
-		strncat(cmdline, argv[i], CMDLINE_SIZE-1);
-		strncat(cmdline, " ", CMDLINE_SIZE-1);
+		size_t cmdline_len = strlen(cmdline);
+		size_t arg_len = strlen(argv[i]);
+		if (cmdline_len + arg_len + 2 < CMDLINE_SIZE) {
+			strcat(cmdline, argv[i]);
+			strcat(cmdline, " ");
+		} else {
+			/* If there is not enough room in the target buffer, we end the
+			   string with "..." and abort further concatenation. */
+			int spos = cmdline_len+4 < CMDLINE_SIZE ? cmdline_len : cmdline_len-4;
+			sprintf(cmdline+spos, "...");
+			break;
+		}
 	}
 
 	for (i = 1; argv[i]; i++) {
