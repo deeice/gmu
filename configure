@@ -499,7 +499,7 @@ code_test="int testvar = WACS_VLINE;"
 test_lib "ncursesw"
 tool_gmuc=$?
 
-if [ $dec_opus != 0 ]; then
+if [ "$dec_opus" != 0 ]; then
 	includes_test="#include <opus/opus.h>
 #include <opusfile.h>"
 	includes_test_flags="-I$BASE_INCLUDE_PATH/opus"
@@ -510,7 +510,7 @@ if [ $dec_opus != 0 ]; then
 	[ $dec_opus = 1 ] && add_config "DEC_opus_CFLAGS=$includes_test_flags"
 fi
 
-if [ $dec_mpg123 != 0 ]; then
+if [ "$dec_mpg123" != 0 ]; then
 	includes_test="#include <mpg123.h>"
 	libs_test="-lmpg123"
 	code_test=""
@@ -518,7 +518,7 @@ if [ $dec_mpg123 != 0 ]; then
 	dec_mpg123=$?
 fi
 
-if [ $dec_flac != 0 ]; then
+if [ "$dec_flac" != 0 ]; then
 	includes_test="#include <FLAC/stream_decoder.h>"
 	libs_test="-lFLAC"
 	code_test=""
@@ -526,7 +526,7 @@ if [ $dec_flac != 0 ]; then
 	dec_flac=$?
 fi
 
-if [ $dec_vorbis != 0 ]; then
+if [ "$dec_vorbis" != 0 ]; then
 	includes_test="#include <tremor/ivorbiscodec.h>"
 	libs_test="-lvorbisidec"
 	code_test=""
@@ -534,7 +534,7 @@ if [ $dec_vorbis != 0 ]; then
 	dec_vorbis=$?
 fi
 
-if [ $dec_modplug != 0 ]; then
+if [ "$dec_modplug" != 0 ]; then
 	includes_test="#include <libmodplug/modplug.h>"
 	libs_test="-lmodplug"
 	code_test=""
@@ -542,7 +542,7 @@ if [ $dec_modplug != 0 ]; then
 	dec_modplug=$?
 fi
 
-if [ $dec_openmpt != 0 ]; then
+if [ "$dec_openmpt" != 0 ]; then
 	includes_test="#include <libopenmpt/libopenmpt.h>
 #include <libopenmpt/libopenmpt_stream_callbacks_file.h>"
 	libs_test="-lopenmpt"
@@ -551,7 +551,7 @@ if [ $dec_openmpt != 0 ]; then
 	dec_openmpt=$?
 fi
 
-if [ $dec_speex != 0 ]; then
+if [ "$dec_speex" != 0 ]; then
 	includes_test="#include <ogg/ogg.h>
 #include <speex/speex.h>
 #include <speex/speex_header.h>
@@ -565,7 +565,7 @@ if [ $dec_speex != 0 ]; then
 	[ $dec_speex = 1 ] && add_config "DEC_speex_CFLAGS=$includes_test_flags"
 fi
 
-if [ $feature_medialib != 0 ]; then
+if [ "$feature_medialib" != 0 ]; then
 	includes_test="#include <sqlite3.h>"
 	libs_test="-lsqlite3"
 	code_test=""
@@ -578,7 +578,7 @@ if [ $feature_medialib != 0 ]; then
 	fi
 fi
 
-if [ $fe_sdl != 0 ]; then
+if [ "$fe_sdl" != 0 ]; then
 	if [ "$sdk_path" ]; then
 		sdl_cflags=$(sdl-config --prefix="$sdk_path" --cflags)
 		sdl_libs=$(sdl-config --prefix="$sdk_path" --libs)
@@ -595,7 +595,7 @@ if [ $fe_sdl != 0 ]; then
 	fe_sdl=$?
 fi
 
-if [ $fe_web != 0 ]; then
+if [ "$fe_web" != 0 ]; then
 	includes_test="#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -614,7 +614,7 @@ if [ $fe_web != 0 ]; then
 	fe_web=$?
 fi
 
-if [ $fe_lirc != 0 ]; then
+if [ "$fe_lirc" != 0 ]; then
 	includes_test="#include <pthread.h>
 #include <lirc/lirc_client.h>"
 	libs_test="-llirc_client"
@@ -623,7 +623,7 @@ if [ $fe_lirc != 0 ]; then
 	fe_lirc=$?
 fi
 
-if [ $fe_log != 0 ]; then
+if [ "$fe_log" != 0 ]; then
 	includes_test="#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -635,7 +635,7 @@ if [ $fe_log != 0 ]; then
 	fe_log=$?
 fi
 
-if [ $fe_notify != 0 ]; then
+if [ "$fe_notify" != 0 ]; then
 	includes_test="#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
