@@ -45,7 +45,11 @@ static const char *get_name(void)
 
 static int decode_data(char *target, size_t max_size)
 {
+#if 1 // ZIPIT_Z2 bug fix
 	static int              ret = MPG123_NEED_MORE;
+#else
+	int                     ret = 1;
+#endif
 	struct mpg123_frameinfo mi;
 	size_t                  decsize = 0;
 	int                     readsize;
@@ -103,23 +107,31 @@ static int decode_data(char *target, size_t max_size)
 			seek_request = 0;
 		}
 
+#if 1 // ZIPIT_Z2 bug fix
 		if (ret == MPG123_NEED_MORE) {
-			readsize = 4096;
-			if (metaint > 0) { // Was metacount, but matches below and seems more correct.
-				if (metacount < readsize) readsize = metacount;
-				metacount -= readsize;
-			}
-			if (reader_read_bytes(r, readsize)) {
-				int size = reader_get_number_of_bytes_in_buffer(r);
-				if (size > 0) {
-					mpg123_feed(player, (unsigned char *)reader_get_buffer(r), size);
-				}
-			} else {
-				wdprintf(V_WARNING, "mpg123", "Got no data from reader :(\n");
-				if (reader_get_number_of_bytes_in_buffer(r) == 0)
-					ret = MPG123_DONE;
-			}
+#endif		
+		readsize = 4096;
+#if 1 // ZIPIT_Z2 bug fix
+		if (metaint > 0) { // This SEEMS more correct, metacount cannot be 0 and should not be < 0
+#else
+		//if (metacount > 0) {
+#endif			
+			if (metacount < readsize) readsize = metacount;
+			metacount -= readsize;
 		}
+		if (reader_read_bytes(r, readsize)) {
+			int size = reader_get_number_of_bytes_in_buffer(r);
+			if (size > 0) {
+				mpg123_feed(player, (unsigned char *)reader_get_buffer(r), size);
+			}
+		} else {
+			wdprintf(V_WARNING, "mpg123", "Got no data from reader :(\n");
+			if (reader_get_number_of_bytes_in_buffer(r) == 0)
+				ret = MPG123_DONE;
+		}
+#if 1 // ZIPIT_Z2 bug fix
+		}
+#endif
 	}
 	mpg123_info(player, &mi);
 	bitrate = 1000 * (mi.abr_rate ? mi.abr_rate : mi.bitrate);
@@ -148,10 +160,14 @@ static int decode_data(char *target, size_t max_size)
 			}
 		} while (ret == MPG123_NEED_MORE && decsize == 0 && !reader_is_eof(r));
 	}
+#if 1 // ZIPIT_Z2 bug fix
 	if (ret == MPG123_DONE) {
 		decsize = 0;
 		ret = MPG123_NEED_MORE; /* Start over with feed cycle */
 	}
+#else
+	if (ret == MPG123_DONE) decsize = 0;
+#endif	
 	return decsize;
 }
 
