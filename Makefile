@@ -28,7 +28,7 @@ PREFIX?=/usr/local
 # now, so neither is enabled by default. One of them will be enabled later
 # when most conversion issues in the code-base have been resolved.
 #CFLAGS+=$(COPTS) -O2 -pipe -Wall -Wformat -Wformat=2 -Wimplicit-fallthrough -Wcast-qual
-CFLAGS+=$(COPTS) -O2 -pipe -Wall -Wformat -Wformat=2 -Wcast-qual
+CFLAGS+=$(COPTS) -O2 -pipe -Wall -Wformat -Wformat=2 -Wcast-qual -DURL_WITH_CURL
 CFLAGS+=-Wno-variadic-macros -Wuninitialized -Wcast-align -Wredundant-decls -Wmissing-declarations
 #CFLAGS+=-Werror=implicit -Werror=format-security -Werror=incompatible-pointer-types -Werror=int-conversion
 CFLAGS+=-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fexceptions -fno-delete-null-pointer-checks
@@ -45,7 +45,7 @@ ifeq ($(RELEASE_BUILD),1)
 LFLAGS+=-s
 endif
 
-LIBS_CORE+=$(SDL_LIB) -lrt
+LIBS_CORE+=$(SDL_LIB) -lrt -lcurl
 ifeq ($(GMU_MEDIALIB),1)
 LIBS_CORE+=-lsqlite3
 endif

@@ -46,6 +46,17 @@ typedef struct
 	size_t          stream_pos;
 
 	int             is_ready;
+#ifdef URL_WITH_CURL
+	char            url[1024]; // ZIPIT_Z2
+#ifdef PARSE_META_IN_READER  // ICY parsing in a curl callback may be simpler than in decoders.
+	// Core ICY Metadata State for Libcurl
+	long icy_metaint;       /* Interlaced interval parsed from headers */
+	long bytes_until_meta;  /* Byte countdown timer until next block */
+	int  meta_length;       /* Dynamically calculated length of the active block */
+	int  meta_read_bytes;   /* Counter tracker for reading wide meta blocks */
+	char meta_buffer[4096]; /* Anchor buffer to accumulate text bytes safely */
+#endif  
+#endif
 } Reader;
 
 /* Opens a local file or HTTP URL for reading */
