@@ -34,6 +34,9 @@ static TrackInfo      ti, ti_metaonly;
 static Reader        *r;
 static int            metaint = -1, metacount = 0;
 static int            seek_request = 0;
+#if 1 // ZIPIT_Z2 bug fix
+static int            mono = 0;
+#endif
 
 static const char *get_name(void)
 {
@@ -181,6 +184,14 @@ static int mpg123_play_file(const char *mpeg_file)
 
 		if (r) { /* Always use stream reader */
 			wdprintf(V_INFO, "mpg123", "Opening stream...\n");
+#if 1 // ZIPIT_Z2 bug fix
+			// FORCE STEREO: Apply the flag BEFORE opening the file (else MONO station emulates chipmonks)
+			// We use MPG123_ADD_FLAGS to safely append it alongside default settings
+			int err = mpg123_param(player, MPG123_ADD_FLAGS, MPG123_FORCE_STEREO, 0.0);
+			if (err != MPG123_OK) {
+				wdprintf(V_ERROR, "Failed to set FORCE_STEREO: %s\n", mpg123_strerror(player));
+			}
+#endif			
 			if (mpg123_open_feed(player) == MPG123_OK) {
 				int   status;
 				int   size = reader_get_number_of_bytes_in_buffer(r); /* There are some bytes in the buffer already, that should be used first */
@@ -211,7 +222,26 @@ static int mpg123_play_file(const char *mpeg_file)
 					}
 				} while (status == MPG123_NEED_MORE && !reader_is_eof(r));
 				wdprintf(V_DEBUG, "mpg123", "Next metadata in %d bytes.\n", metacount);
-
+#if 1 // ZIPIT_Z2 bug fix				
+				mono = 0;
+				if (channels == 1) {
+					wdprintf(V_INFO, "mpg123", "Mono stream detected. Forcing mpg123 stereo conversion.\n");
+					wdprintf(V_INFO, "mpg123", "DEBUG FREQ: Native rate is %ld Hz\n", rate);
+					channels = 2; // Force libmpg123 to automatically duplicate mono data into 2 channels
+					mono = 1;
+				}
+				else {
+					struct mpg123_frameinfo info;
+					// mpg123_info populates the frameinfo struct for the current frame
+					if (mpg123_info(player, &info) == MPG123_OK) {
+						// Check the underlying MPEG mode directly
+						if (info.mode == MPG123_M_MONO) {
+							mono = 1;
+							wdprintf(V_INFO, "mpg123", "MONO stream detected. Forcing mpg123 stereo conversion.\n");
+						}
+					}
+				}
+#endif
 				/* Set meta data */
 				{
 					char *name = cfg_get_key_value(r->streaminfo, "icy-name");
