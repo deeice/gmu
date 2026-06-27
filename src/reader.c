@@ -522,7 +522,7 @@ int reader_is_seekable(Reader *r)
 	return r->seekable;
 }
 
-int reader_seek_whence(Reader *r, long byte_offset, int whence)
+int reader_seek_whence(Reader *r, ssize_t byte_offset, int whence)
 {
 	int res = 0;
 	if (r->file) {
@@ -545,7 +545,7 @@ int reader_seek_whence(Reader *r, long byte_offset, int whence)
 	return res;
 }
 
-int reader_seek(Reader *r, long byte_offset)
+int reader_seek(Reader *r, ssize_t byte_offset)
 {
 	return reader_seek_whence(r, byte_offset, SEEK_SET);
 }

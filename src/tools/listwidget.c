@@ -19,6 +19,7 @@
 #define _XOPEN_SOURCE_EXTENDED
 #endif
 #include <curses.h>
+#include "charstubs.h"
 #include "window.h"
 #include "listwidget.h"
 

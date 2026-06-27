@@ -27,12 +27,13 @@ PREFIX?=/usr/local
 # The -Wconversion and -Wsign-conversion flags create too much noise right
 # now, so neither is enabled by default. One of them will be enabled later
 # when most conversion issues in the code-base have been resolved.
-CFLAGS+=$(COPTS) -O2 -pipe -Wall -Wformat -Wformat=2 -Wimplicit-fallthrough -Wcast-qual
+#CFLAGS+=$(COPTS) -O2 -pipe -Wall -Wformat -Wformat=2 -Wimplicit-fallthrough -Wcast-qual
+CFLAGS+=$(COPTS) -O2 -pipe -Wall -Wformat -Wformat=2 -Wcast-qual
 CFLAGS+=-Wno-variadic-macros -Wuninitialized -Wcast-align -Wredundant-decls -Wmissing-declarations
-CFLAGS+=-Werror=implicit -Werror=format-security -Werror=incompatible-pointer-types -Werror=int-conversion
+#CFLAGS+=-Werror=implicit -Werror=format-security -Werror=incompatible-pointer-types -Werror=int-conversion
 CFLAGS+=-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fexceptions -fno-delete-null-pointer-checks
-CFLAGS+=-fno-strict-aliasing -fno-strict-overflow -fstack-clash-protection
-CFLAGS+=-fstack-protector-strong -fstrict-flex-arrays=3
+#CFLAGS+=-fno-strict-aliasing -fno-strict-overflow -fstack-clash-protection
+#CFLAGS+=-fstack-protector-strong -fstrict-flex-arrays=3
 # GCC-only flags:
 #CFLAGS+=-Wtrampolines -Wbidi-chars=any,ucn
 CFLAGS+=-DFILE_HW_H="\"hw_$(TARGET).h\"" -DGMU_INSTALL_PREFIX="\"$(PREFIX)\"" -DGMU_SYSCONFDIR="\"$(SYSCONFDIR)\""

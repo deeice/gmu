@@ -213,6 +213,10 @@ print_features_and_write_config()
 		echo "gmuc enabled"
 		TOOLS_TO_BUILD="$TOOLS_TO_BUILD gmuc"
 		EXTRA_CFLAGS="$EXTRA_CFLAGS -I$BASE_INCLUDE_PATH/ncursesw"
+	else
+#               ZIPIT_Z2 IZ2S only has curses, not cursesw	    
+		echo "gmuc enabled"
+		TOOLS_TO_BUILD="$TOOLS_TO_BUILD gmuc"
 	fi
 	if [ "$feature_medialib" = 1 ]; then
 		echo "Media library enabled"
