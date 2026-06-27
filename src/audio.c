@@ -23,7 +23,11 @@
 #include "gmuerror.h"
 #include "core.h"
 #include FILE_HW_H
+#if 1 // ZIPIT_Z2 INTERPOLATION
+#define RINGBUFFER_SIZE 262144  // Allow some interpolation space to avoid blocking.
+#else
 #define RINGBUFFER_SIZE 131072
+#endif
 
 static RingBuffer    audio_rb;
 static unsigned int  volume_fade_percent = 100;
@@ -44,10 +48,146 @@ static int           device_open;
 
 static unsigned int  volume, volume_internal;
 
+#if 1 // ZIPIT_Z2 INTERPOLATION
+// Pre-allocate an output buffer that has a little bit of breathing room.
+// Since we are stretching by 1.18%, the output can be up to ~1.2% larger than the input chunk.
+// If your standard 'size' is usually 4096 or 8192 bytes, 65536 bytes provides massive headroom.
+// Um yeah, fileplayer requests 65536 bytes from decode_data, so we need > 32768 int16.
+static int16_t interp_out_buf[36000];  
+// static int16_t interp_out_buf[2][36000]; // I might need ping pong buffer.
+// static int     buf_toggle = 0;           
+static int interpolation_needed = 0;
+
+#if 0
+// FIXED-POINT CONFIGURATION FOR 1.18% HARDWARE DRIFT
+// -------------------------------------------------------------
+// If playback runs at 100.47% speed.
+// Target Correction Scale (with 16.16 Fixed Point numbers) =  65536 / 1.0047 = 65229
+// -------------------------------------------------------------
+#define STEP_441K_FAMILY_STRETCH  65229  // Use 65229 for 0.47% (theoretical) or 65151 for 0.59%
+#define STEP_PASSTHROUGH          65536  // 1:1 behavior
+
+uint32_t step_fp = STEP_PASSTHROUGH;
+
+// Apply your fixed-point stretch purely to the 44.1kHz family 
+if (stream_sample_rate == 44100 || stream_sample_rate == 22050 || stream_sample_rate == 11025) {
+    step_fp = STEP_441K_FAMILY_STRETCH;
+} else {
+    step_fp = STEP_PASSTHROUGH; // Leave 48k family un-interpolated
+}
+#endif
+
+static void apply_linear_correction(int16_t *in_buf, int16_t *out_buf, int in_samples, int *out_samples, uint32_t step_fp) {
+    static uint32_t fp_index = 0;
+    
+    // Persistent static registers acting as a shift register across blocks
+    static int32_t s0_l = 0; 
+    static int32_t s0_r = 0; 
+    
+    int out_idx = 0;
+
+    // The loop runs natively through every single sample frame in the block
+    while ((fp_index >> 16) < (uint32_t)in_samples) {
+        uint32_t sample_idx = fp_index >> 16;
+        uint32_t frac = fp_index & 0xFFFF;
+
+        // 1. Fetch the active current target into s1
+        int32_t s1_l = in_buf[sample_idx * 2];     
+        int32_t s1_r = in_buf[sample_idx * 2 + 1]; 
+
+        // 2. Interpolate between the persistent s0 and our fresh s1
+        int32_t diff_l = s1_l - s0_l;
+        out_buf[out_idx * 2] = (int16_t)(s0_l + (((int64_t)diff_l * frac) >> 16));
+
+        int32_t diff_r = s1_r - s0_r;
+        out_buf[out_idx * 2 + 1] = (int16_t)(s0_r + (((int64_t)diff_r * frac) >> 16));
+
+        fp_index += step_fp;
+	out_idx++;
+	if ((fp_index >> 16) > sample_idx) {
+	  s0_l = s1_l; 
+	  s0_r = s1_r; 
+	}
+    }
+    
+    fp_index &= 0xFFFF; 
+    *out_samples = out_idx; // Return the interpolated sample count
+}
+
+static void apply_cubic_correction(int16_t *in_buf, int16_t *out_buf, int in_samples, int *out_samples, uint32_t step_fp) {
+    static uint32_t fp_index = 0;
+    
+    // 4-stage persistent shift registers for Left and Right channels
+    static int32_t s0_l = 0, s1_l = 0, s2_l = 0, s3_l = 0; 
+    static int32_t s0_r = 0, s1_r = 0, s2_r = 0, s3_r = 0; 
+    
+    int out_idx = 0;
+
+    while ((fp_index >> 16) < (uint32_t)in_samples) {
+        uint32_t sample_idx = fp_index >> 16;
+        int64_t  f = fp_index & 0xFFFF; // 16-bit fraction (0 to 65535) 
+
+        // Fetch the upcoming future look-ahead target from the buffer
+        s3_l = in_buf[sample_idx * 2];     
+        s3_r = in_buf[sample_idx * 2 + 1]; 
+
+        // --- LEFT CHANNEL CUBIC SPLINE (Horner's Method) ---
+        // Pre-calculate standard Catmull-Rom coefficients scaled to prevent 32-bit clip
+        int64_t a_l = (-s0_l + 3 * s1_l - 3 * s2_l + s3_l) / 2;
+        int64_t b_l = 2 * s0_l - 5 * s1_l + 4 * s2_l - s3_l;
+        int64_t c_l = (-s0_l + s2_l) / 2;
+
+        // Nested multiplication reduces hardware cycles: ((A*f + B)*f + C)*f + s1
+        int64_t out_l = (((((a_l * f) >> 16) + b_l) * f) >> 16) + c_l;
+        out_buf[out_idx * 2] = (int16_t)(s1_l + ((out_l * f) >> 16)); // 
+
+        // --- RIGHT CHANNEL CUBIC SPLINE ---
+        int64_t a_r = (-s0_r + 3 * s1_r - 3 * s2_r + s3_r) / 2;
+        int64_t b_r = 2 * s0_r - 5 * s1_r + 4 * s2_r - s3_r;
+        int64_t c_r = (-s0_r + s2_r) / 2;
+
+        int64_t out_r = (((((a_r * f) >> 16) + b_r) * f) >> 16) + c_r;
+        out_buf[out_idx * 2 + 1] = (int16_t)(s1_r + ((out_r * f) >> 16)); // 
+
+        fp_index += step_fp;
+        out_idx++; 
+
+        // 4-STAGE PIPELINE SHIFT: Only step the timeline forward when index changes
+        if ((fp_index >> 16) > sample_idx) { 
+            s0_l = s1_l; s1_l = s2_l; s2_l = s3_l; // 
+            s0_r = s1_r; s1_r = s2_r; s2_r = s3_r; // 
+        }
+    }
+
+    fp_index &= 0xFFFF; 
+    *out_samples = out_idx; 
+}
+#endif
 
 int audio_fill_buffer(char *data, size_t size)
 {
 	int result = 0;
+#if 1 // ZIPIT_Z2 INTERPOLATION
+	// 2. Apply interpolation ONLY if we are playing the problematic 44.1kHz family
+	if (interpolation_needed) {
+		int16_t *in_samples = (int16_t *)data;
+		int in_sample_count = size / 4; // 4 bytes per stereo frame (16-bit L + 16-bit R)
+		int samples_generated = 0;
+
+		// Ensure we have plenty of room for expanded samples BEFORE the interpolation.
+		if (audio_buffer_get_size() - audio_buffer_get_fill() < size * 5 / 4)
+		  return 0;
+
+		// Apply your hardware slowdown multiplier
+		//apply_linear_correction(in_samples, interp_out_buf, in_sample_count, &samples_generated, 65229);
+		apply_cubic_correction(in_samples, interp_out_buf, in_sample_count, &samples_generated, 65229);
+		// Map the new sample timeline payload back to an absolute byte size
+		//wdprintf(V_DEBUG, "audio", "INTERPOLATION (%d ==> %d)\n", size, (samples_generated * 4));
+		size = (size_t)samples_generated * 4;
+		data = (char *)interp_out_buf;
+	}
+	// 3. Native pass-through mode: 48kHz, 32kHz, etc. run with 0% interpolation CPU overhead
+#endif    
 	SDL_LockAudio();
 	result = ringbuffer_write(&audio_rb, data, size);
 	SDL_UnlockAudio();
@@ -187,6 +327,16 @@ int audio_device_open(int samplerate, int channels)
 				device_open = 1;
 				have_samplerate = samplerate;
 				have_channels   = channels;
+#if 1 // ZIPIT_Z2 INTERPOLATION
+				// Calculate the interpolation_needed once here
+				// Maybe add IS_URL check(url/filename) for net stream only?
+				if (samplerate == 44100 || samplerate == 22050 || samplerate == 11025) {
+					interpolation_needed = 1;
+				} else {
+					interpolation_needed = 0;
+				}
+				wdprintf(V_DEBUG, "audio", "INTERPOLATION = %d.\n", interpolation_needed);
+#endif
 				wdprintf(V_INFO, "audio", "Device opened with %d Hz, %d channels and sample buffer w/ %d samples.\n",
 						 obtained.freq, obtained.channels, obtained.samples);
 			}
