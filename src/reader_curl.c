@@ -215,7 +215,11 @@ static void *gmu_curl_reader_thread(void *arg)
 	}
 	
 	wdprintf(V_DEBUG, "reader", "thread done.\n");
+	pthread_mutex_lock(&(r->mutex));
 	r->eof = 1; // Mark EOF only after cURL is completely finished
+	// cond_signal in case thread ended quickly, while curl_reader_open() is waiting on headers.
+	pthread_cond_signal(&(r->cond));  
+	pthread_mutex_unlock(&(r->mutex));
 	
 	return NULL;
 }
@@ -244,13 +248,16 @@ static Reader *reader_open_curl(Reader *r, const char *url, int max_redirects)
 			clock_gettime(CLOCK_REALTIME, &ts);
 			ts.tv_sec += timeout_seconds;
 
-			while (!r->header_end_found && !wait_result) {
+			while (!r->header_end_found && !wait_result && !r->eof) {
 				/* Sleep here until the header callback signals us */
-				pthread_cond_timedwait(&r->cond, &r->mutex, &ts);
+				wait_result = pthread_cond_timedwait(&r->cond, &r->mutex, &ts);
 			}
 			pthread_mutex_unlock(&r->mutex);
 			if (wait_result == ETIMEDOUT) {
 				wdprintf(V_DEBUG, "reader", "Timed out waiting for HTTP headers!\n");
+			}
+			else if (r->eof) {
+				wdprintf(V_DEBUG, "reader", "EOF waiting for HTTP headers!\n");
 			}
 			/* Try to figure out stream length */
 			if (r->header_end_found) {
