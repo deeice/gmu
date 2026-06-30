@@ -19,6 +19,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <signal.h>
+#ifdef URL_WITH_CURL
+#include <curl/curl.h> // Use tiny-curl lib for https stream support.
+#endif
 #include "SDL.h" /* For audio output */
 #include "playlist.h"
 #include "pbstatus.h"
@@ -1258,6 +1261,13 @@ int main(int argc, char **argv)
 #ifdef GMU_MEDIALIB
 	medialib_open(&gm);
 #endif
+
+#ifdef URL_WITH_CURL
+	/* probably a good idea to init curl before sdl */
+	curl_global_init(CURL_GLOBAL_ALL); 
+	wdprintf(V_DEBUG, "gmu", "curl global init.\n");
+#endif	
+	
 #if 1 // ZIPIT_Z2	
 #if STATIC
 	i = -1; // Assume static load might include SDL front end.
@@ -1615,6 +1625,10 @@ int main(int argc, char **argv)
 	pthread_mutex_destroy(&gmu_running_mutex);
 	SDL_Quit();
 	event_queue_free(&event_queue);
+#ifdef URL_WITH_CURL
+	curl_global_cleanup();
+	wdprintf(V_DEBUG, "gmu", "curl global cleanup.\n");
+#endif	
 	wdprintf(V_INFO, "gmu", "Shutdown complete.\n");
 	return 0;
 }

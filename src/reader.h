@@ -47,6 +47,8 @@ typedef struct
 
 	int             is_ready;
 #ifdef URL_WITH_CURL
+	int		header_end_found;
+	pthread_cond_t  cond;
 	char            url[1024]; // ZIPIT_Z2
 #ifdef PARSE_META_IN_READER  // ICY parsing in a curl callback may be simpler than in decoders.
 	// Core ICY Metadata State for Libcurl

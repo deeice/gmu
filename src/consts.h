@@ -10,5 +10,7 @@
 
 #ifdef URL_WITH_CURL
 #define IS_URL(path) (strncasecmp((path), "http://", 7) == 0 || strncasecmp((path), "https://", 8) == 0)
+#else
+#define IS_URL(path) (strncasecmp((path), "http://", 7) == 0)
 #endif
 #endif

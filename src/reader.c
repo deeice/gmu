@@ -26,9 +26,6 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <signal.h>
-#ifdef URL_WITH_CURL
-#include <curl/curl.h> // Use tiny-curl lib for https stream support.
-#endif
 #include "util.h" /* for assign_signal_handler() */
 #include "reader.h"
 #include "ringbuffer.h"
@@ -58,358 +55,7 @@ size_t reader_get_cache_fill(Reader *r)
 }
 
 #ifdef URL_WITH_CURL
-#ifndef PARSE_META_IN_READER  // ICY parsing in reader.c is a dream...
-static size_t gmu_curl_write_callback(void *ptr, size_t size, size_t nmemb, void *userdata) {
-	size_t total_bytes = size * nmemb;
-	Reader *r = (Reader *)userdata;
-	int write_okay = 0;
-
-	// Handle 0-byte edge cases cleanly
-	if (total_bytes == 0) return 0;
-
-	/* 
-	 * 1. THE WRITE & THROTTLE LOOP
-	 * Keep looping until Gmu's buffer accepts the data chunk, 
-	 * or until the main thread flags an exit request (r->eof).
-	 */
-	while (!write_okay && !r->eof) {
-		pthread_mutex_lock(&(r->mutex));
-		// Note: Gmu's native logic passes the whole buffer chunk at once
-		write_okay = ringbuffer_write(&(r->rb_http), (char *)ptr, total_bytes);
-		pthread_mutex_unlock(&(r->mutex));
-
-		// Inside your original write callback loop where ringbuffer_write succeeds:
-		if (!write_okay) {
-			// Buffer is full. Yield CPU to let the decoder catch up.
-			// Using Gmu's original 1500us (1.5ms) delay timing.
-			usleep(1500);
-		}
-	}
-
-	/* 
-	 * 2. INTERRUPT CHECK
-	 * If the loop broke because the user pressed stop (r->eof became 1),
-	 * return 0 to tell cURL to immediately abort its active network stream.
-	 */
-	if (r->eof) {
-		return 0; 
-	}
-
-	/* 
-	 * 3. PRE-BUFFERING HANDSHAKE
-	 * If Gmu is waiting for the initial buffer to fill, check if we hit the limit yet.
-	 */
-	if (!r->is_ready && ringbuffer_get_fill(&(r->rb_http)) >= http_cache_prebuffer_size) {
-		r->is_ready = 1;
-	}
-
-	/* 
-	 * 4. LIVE LOGGING
-	 * Keep Gmu's original console buffer tracker functional.
-	 */
-	wdprintf(V_DEBUG, "reader", "buf fill: %d bytes\r", ringbuffer_get_fill(&(r->rb_http)));
-	fflush(stdout);
-
-	// Tell cURL we processed all incoming bytes successfully
-	return total_bytes; 
-}
-#else // ZIPIT_Z2 CURL
-static void parse_and_update_stream_title(const char *meta, Reader *r)
-{
-	// Meta matches the standard ICY layout: StreamTitle='Artist - Title';StreamUrl='';
-	char *title_start = strstr(meta, "StreamTitle='");
-	if (title_start) {
-		title_start += 13; // Jump past StreamTitle='
-		char *title_end = strchr(title_start, '\'');
-		if (title_end) {
-			size_t len = title_end - title_start;
-			if (len > 0 && len < 256) {
-				char clean_title[256];
-				memcpy(clean_title, title_start, len);
-				clean_title[len] = '\0';
-				
-				wdprintf(V_INFO, "reader", "New ICY Stream Title: %s\n", clean_title);
-				
-				// Keep Gmu's internal configuration state updated
-				cfg_add_key(r->streaminfo, "title", clean_title);
-
-				// NOTE: If Gmu requires an event signal to force the frontend
-				// screen to redraw immediately, add that UI broadcast macro here.
-				
-				// NOTE: mpg123.c puts this in trackinfo and sets updated flag.  Need equivalent...
-				//   trackinfo_set_title(&ti, stitle_utf8);
-				//   trackinfo_set_updated(&ti);
-				
-			}
-		}
-	}
-}
-
-// Thread-safe wrapper that retains your original gmu throttling, mutex, and pre-buffering
-static int gmu_write_audio_to_ringbuffer(Reader *r, const char *data, size_t len)
-{
-	if (len == 0) return 1;
-	int write_okay = 0;
-
-	while (!write_okay && !r->eof) {
-		pthread_mutex_lock(&(r->mutex));
-		write_okay = ringbuffer_write(&(r->rb_http), (char *)data, len);
-		pthread_mutex_unlock(&(r->mutex));
-
-		if (!write_okay) {
-			usleep(1500); // Gmu's original 1.5ms delay timing
-		}
-	}
-
-	if (r->eof) return 0; // Signal failure to break the parent curl process
-
-	if (!r->is_ready && ringbuffer_get_fill(&(r->rb_http)) >= http_cache_prebuffer_size) {
-		r->is_ready = 1;
-	}
-
-	return 1;
-}
-
-size_t gmu_curl_write_callback(void *ptr, size_t size, size_t nmemb, void *userdata)
-{
-	size_t total_bytes = size * nmemb;
-	Reader *r = (Reader *)userdata;
-	size_t consumed = 0;
-	char *char_ptr = (char *)ptr;
-
-	if (total_bytes == 0) return 0;
-
-	// Fallback: If no ICY stream metadata header was detected, route raw bytes directly
-	if (r->icy_metaint <= 0) {
-		if (!gmu_write_audio_to_ringbuffer(r, char_ptr, total_bytes)) return 0;
-		wdprintf(V_DEBUG, "reader", "buf fill: %d bytes\r", ringbuffer_get_fill(&(r->rb_http)));
-		fflush(stdout);
-		return total_bytes;
-	}
-
-	// ICY Parsing State Machine Loop
-	while (consumed < total_bytes && !r->eof) {
-		
-		// State 1: Writing pure audio data
-		if (r->bytes_until_meta > 0) {
-			size_t bytes_to_write = total_bytes - consumed;
-			if (bytes_to_write > (size_t)r->bytes_until_meta) {
-				bytes_to_write = r->bytes_until_meta;
-			}
-
-			if (!gmu_write_audio_to_ringbuffer(r, char_ptr + consumed, bytes_to_write)) {
-				return 0; 
-			}
-
-			r->bytes_until_meta -= bytes_to_write;
-			consumed += bytes_to_write;
-		} 
-		
-		// State 2: Reading the Metadata Length byte
-		else if (r->meta_length == -1) {
-			unsigned char len_byte = (unsigned char)char_ptr[consumed];
-			r->meta_length = len_byte * 16;
-			r->meta_read_bytes = 0;
-			consumed++;
-
-			if (r->meta_length == 0) {
-				// No metadata update at this interval, reset countdown for next audio chunk
-				r->bytes_until_meta = r->icy_metaint;
-				r->meta_length = -1;
-			}
-		} 
-		
-		// State 3: Extracting the actual Metadata Block
-		else {
-			size_t bytes_to_read = total_bytes - consumed;
-			if (bytes_to_read > (size_t)(r->meta_length - r->meta_read_bytes)) {
-				bytes_to_read = r->meta_length - r->meta_read_bytes;
-			}
-
-			// Accumulate metadata string safely checking buffer constraints
-			if (r->meta_read_bytes + bytes_to_read < sizeof(r->meta_buffer) - 1) {
-				memcpy(r->meta_buffer + r->meta_read_bytes, char_ptr + consumed, bytes_to_read);
-			}
-
-			r->meta_read_bytes += bytes_to_read;
-			consumed += bytes_to_read;
-
-			// Finished gathering the whole metadata block
-			if (r->meta_read_bytes >= r->meta_length) {
-				int final_len = (r->meta_length < (int)sizeof(r->meta_buffer) - 1) ? r->meta_length : (int)sizeof(r->meta_buffer) - 1;
-				r->meta_buffer[final_len] = '\0'; 
-				
-				parse_and_update_stream_title(r->meta_buffer, r);
-
-				// Reset counters for the next cycle
-				r->bytes_until_meta = r->icy_metaint;
-				r->meta_length = -1;
-			}
-		}
-	}
-
-	wdprintf(V_DEBUG, "reader", "buf fill: %d bytes\r", ringbuffer_get_fill(&(r->rb_http)));
-	fflush(stdout);
-
-	return r->eof ? 0 : total_bytes;
-}
-#endif  // ZIPIT_Z2 CURL
-
-static size_t gmu_curl_header_callback(char *buffer, size_t size, size_t nitems, void *userdata)
-{
-	size_t total_bytes = size * nitems;
-	Reader *r = (Reader *)userdata;
-	
-	// Libcurl passes blank lines ("\r\n") at the end of headers; skip them
-	if (total_bytes <= 2 || buffer[0] == '\r' || buffer[0] == '\n') {
-		return total_bytes;
-	}
-
-	// Find the colon separating key and value
-	char *colon = memchr(buffer, ':', total_bytes);
-	if (colon) {
-		char key[256];
-		char value[512];
-		
-		// Calculate lengths safely within bounds
-		size_t key_len = colon - buffer;
-		if (key_len > 255) key_len = 255;
-		
-		// Extract and null-terminate the key
-		memcpy(key, buffer, key_len);
-		key[key_len] = '\0';
-		
-		// Skip colon and any leading spaces for the value
-		char *val_start = colon + 1;
-		while (val_start < buffer + total_bytes && *val_start == ' ') {
-			val_start++;
-		}
-		
-		// Calculate value length, cutting off trailing \r or \n
-		char *val_end = buffer + total_bytes;
-		while (val_end > val_start && (*(val_end - 1) == '\r' || *(val_end - 1) == '\n')) {
-			val_end--;
-		}
-		
-		size_t val_len = val_end - val_start;
-		if (val_len > 511) val_len = 511;
-		
-		if (val_len > 0) {
-			memcpy(value, val_start, val_len);
-			value[val_len] = '\0';
-			
-			// Replicate Gmu's original config management behavior
-			wdprintf(V_DEBUG, "reader", "key=[%s]\n", key);
-			wdprintf(V_DEBUG, "reader", "value=[%s]\n", value);
-			cfg_add_key(r->streaminfo, key, value);
-
-#ifndef PARSE_META_IN_READER  // ICY parsing in reader.c is a dream...
-#else // ZIPIT_Z2 CURL
-			// Intercept the metadata interval.  Check case-insensitively for the ICY interval header
-			if (strcasecmp(key, "icy-metaint") == 0) {
-				r->icy_metaint = strtol(value, NULL, 10);
-				r->bytes_until_meta = r->icy_metaint; // Initialize the byte countdown timer
-				wdprintf(V_INFO, "reader", "ICY Metadata every %ld bytes.\n", r->icy_metaint);
-			}
-#endif			
-		}
-	}
-	
-	wdprintf(V_INFO, "reader", "total_bytes=%d.\n", total_bytes);
-	return total_bytes;
-}
-
-// Libcurl progress callback (Runs multiple times per second during transfer/handshakes)
-static int gmu_curl_progress_callback(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow)
-{
-	Reader *r = (Reader *)clientp;
-
-	// If Gmu main thread flagged an abort or EOF, return non-zero to terminate cURL instantly
-	if (r && r->eof) {
-		wdprintf(V_DEBUG, "reader", "Progress callback intercepted r->eof. Aborting curl stream.\n");
-		return 1; 
-	}
-	
-	return 0; // 0 means continue running normally
-}
-
-static void *http_reader_thread(void *arg)
-{
-	Reader *r = (Reader *)arg;
-
-	CURL *curl = curl_easy_init();
-	if (!curl) {
-		r->eof = 1;
-		return NULL;
-	}
-
-	// Replicate Gmu's original custom User-Agent
-	char user_agent_buf[64];
-	snprintf(user_agent_buf, sizeof(user_agent_buf), "Gmu/%s", VERSION_NUMBER);
-	curl_easy_setopt(curl, CURLOPT_USERAGENT, user_agent_buf);
-
-	// Inject the custom ICY metadata request header
-	struct curl_slist *headers = NULL;
-	headers = curl_slist_append(headers, "Icy-MetaData: 1");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-
-	// Configure connection settings
-	curl_easy_setopt(curl, CURLOPT_URL, r->url); // Ensure r->url is populated in _reader_open
-	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
-	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-
-	// Fast disconnect & dead stream timeouts
-	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6L);   // Max 6 seconds to connect
-	curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);  // Below 1 byte/sec...
-	curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 5L);   // ...for 5 seconds = dead stream.
-
-	// Progress function for instant user interrupt 
-	curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, gmu_curl_progress_callback);
-	curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, r);
-	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);       // Must be 0L to activate callback!
-
-	// Register the header callback
-	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, gmu_curl_header_callback);
-	curl_easy_setopt(curl, CURLOPT_HEADERDATA, r);
-
-	// Route audio data directly to your original ring buffer writer
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, gmu_curl_write_callback);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, r);
-
-#ifndef PARSE_META_IN_READER  // ICY parsing in reader.c is a dream...
-#else // ZIPIT_Z2 CURL
-	// Init Icy meta parser
-	r->icy_metaint = 0; // Will be populated by the header callback automatically
-	r->bytes_until_meta = 0;
-	r->meta_length = -1;
-	r->meta_read_bytes = 0;
-	memset(r->meta_buffer, 0, sizeof(r->meta_buffer));
-#endif
-
-	// Run the connection blocking loop
-	CURLcode res = curl_easy_perform(curl);
-
-	// If the stream was successfully parsed, populate r->file_size
-	if (res == CURLE_OK) {
-		char *val = cfg_get_key_value_ignore_case(r->streaminfo, "Content-Length");
-		if (val) {
-			r->file_size = atol(val);
-			wdprintf(V_DEBUG, "reader", "Stream size = %d bytes.\n", r->file_size);
-		}
-	}
-
-	// Clean up allocations safely for the Zipit Z2
-	curl_easy_cleanup(curl);
-	if (headers) {
-		curl_slist_free_all(headers);
-	}
-	
-	wdprintf(V_DEBUG, "reader", "thread done.\n");
-	r->eof = 1; // Mark EOF only after cURL is completely finished
-	
-	return NULL;
-}
+#include "reader_curl.c"
 #else
 
 /* get sockaddr, IPv4 or IPv6 */
@@ -519,33 +165,14 @@ static Reader *_reader_open(const char *url, int max_redirects)
 
 		r->streaminfo = cfg_init();
 
+		wdprintf(V_DEBUG, "reader", "reader_open\n");  // ZIPIT DEBUG REMOVE THIS
+		if (IS_URL(url)) { /* Got a HTTP URL */
 #ifdef URL_WITH_CURL
-		/* SAVE THE URL RIGHT AWAY */
-		strncpy(r->url, url, sizeof(r->url) - 1);
-		r->url[sizeof(r->url) - 1] = '\0'; // Ensure null-termination
-
-		if (IS_URL(url)) { /* Got a HTTP URL */			
-			/* Start reader thread... */
-			// NOTE:  512K bytes is well over 10 secs for a 320K bps stream.  Longer for most radio streams.
-			// if (ringbuffer_init(&(r->rb_http), 32768)) { // AI wanted 32K (much less than 512K)
-			if (ringbuffer_init(&(r->rb_http), http_cache_size)) { 
-				// if (pthread_create(&(r->thread), NULL, http_reader_thread, r) != 0) { // AI wanted this
-				if (pthread_create_with_stack_size(&(r->thread), DEFAULT_THREAD_STACK_SIZE, http_reader_thread, r) == 0) {
-					return r;
-				}
-				wdprintf(V_ERROR, "reader", "pthread_create failed.\n");
-			} else {
-				wdprintf(V_ERROR, "reader", "Out of memory.\n");
-			}
-			pthread_mutex_destroy(&(r->mutex));
-			cfg_free(r->streaminfo);
-			free(r);
-			r = NULL;
-			return NULL;
+			return reader_open_curl(r, url, max_redirects);
 #else
-		if (strncasecmp(url, "http://", 7) == 0) { /* Got a HTTP URL */
 			char          *hostname = NULL, *path = NULL;
 			unsigned short port = 80;
+			wdprintf(V_DEBUG, "reader", "http_reader_thread\n");  // ZIPIT DEBUG REMOVE THIS
 			/* open http stream... */
 			/* 1) Split URL into host, port and path */
 			http_url_split_alloc(url, &hostname, &port, &path);
@@ -779,9 +406,14 @@ int reader_close(Reader *r)
 	if (r) {
 		if (r->file) { /* local file */
 			fclose(r->file);
+#ifdef URL_WITH_CURL
+		} else { /* cURL stream */
+			/* Signal the cURL thread that we want to exit. */
+#else
 		} else if (r->sockfd > 0) { /* http stream */
 			/* close http stream */
 			close(r->sockfd);
+#endif
 			r->eof = 1;
 			wdprintf(V_DEBUG, "reader", "Waiting for reader thread to finish.\n");
 			pthread_join(r->thread, NULL);
@@ -860,6 +492,7 @@ int reader_read_bytes(Reader *r, size_t size)
 				}
 			}
 		} else {
+			//wdprintf(V_DEBUG, "reader", "reader_read_bytes %d\n", size);  // ZIPIT DEBUG REMOVE THIS
 			while (!read_okay) {
 				pthread_mutex_lock(&(r->mutex));
 				read_okay = ringbuffer_read(&(r->rb_http), r->buf, size);
@@ -869,6 +502,7 @@ int reader_read_bytes(Reader *r, size_t size)
 				r->buf[size] = '\0';
 				if (!read_okay) usleep(150);
 			}
+			//wdprintf(V_DEBUG, "reader", "reader_got_bytes\n", size);  // ZIPIT DEBUG REMOVE THIS
 		}
 	}
 	return read_okay;
