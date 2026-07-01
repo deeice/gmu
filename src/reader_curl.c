@@ -188,6 +188,7 @@ static void *gmu_curl_reader_thread(void *arg)
 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6L);   // Max 6 seconds to connect
 	curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);  // Below 1 byte/sec...
 	curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 5L);   // ...for 5 seconds = dead stream.
+	//curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);    // maintain a stable stream state
 
 	// Progress function for instant user interrupt 
 	curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, gmu_curl_progress_callback);
@@ -203,11 +204,19 @@ static void *gmu_curl_reader_thread(void *arg)
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, gmu_curl_write_callback);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, r);
 
+	curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L); // Abort on 403, 404,.. errors.
+
 	// Run the connection blocking loop
 	wdprintf(V_DEBUG, "reader", "curl_easy_perform\n");  // ZIPIT DEBUG REMOVE THIS
 	CURLcode res = curl_easy_perform(curl);
 	wdprintf(V_DEBUG, "reader", "curl_easy_perform finished\n");  // ZIPIT DEBUG REMOVE THIS
 
+	if (res == CURLE_HTTP_RETURNED_ERROR) { /* Report 403, 404,.. errors */
+		long http_code = 0;
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+		wdprintf(V_ERROR, "reader", "HTTP error %ld on %s\n", http_code, r->url);
+	}
+	
 	// Clean up allocations safely for the Zipit Z2
 	curl_easy_cleanup(curl);
 	if (headers) {
