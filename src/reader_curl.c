@@ -81,7 +81,7 @@ static size_t gmu_curl_header_callback(char *buffer, size_t size, size_t nitems,
 	
 	// Libcurl passes blank lines ("\r\n") at the end of headers; skip them
 	if (total_bytes <= 2 || buffer[0] == '\r' || buffer[0] == '\n') {
-		wdprintf(V_DEBUG, "reader", "End of Header.  %d bytes\n", total_bytes);  // ZIPIT DEBUG REMOVE THIS
+		wdprintf(V_DEBUG, "reader", "End of Header.  %d bytes\n", total_bytes);  
 		pthread_mutex_lock(&(r->mutex));
 		r->header_end_found = 1;
 		pthread_cond_signal(&(r->cond));
@@ -164,7 +164,7 @@ static void *gmu_curl_reader_thread(void *arg)
 	CURL *curl = curl_easy_init();
 	if (!curl) {
 		r->eof = 1;
-		wdprintf(V_DEBUG, "reader", "curl_easy_init failed\n");  // ZIPIT DEBUG REMOVE THIS
+		wdprintf(V_DEBUG, "reader", "curl_easy_init failed\n"); 
 		return NULL;
 	}
 
@@ -195,7 +195,6 @@ static void *gmu_curl_reader_thread(void *arg)
 	curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, r);
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);       // Must be 0L to activate callback!
 
-	wdprintf(V_DEBUG, "reader", "register curl header callback\n");  // ZIPIT DEBUG REMOVE THIS
 	// Register the header callback
 	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, gmu_curl_header_callback);
 	curl_easy_setopt(curl, CURLOPT_HEADERDATA, r);
@@ -207,9 +206,7 @@ static void *gmu_curl_reader_thread(void *arg)
 	curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L); // Abort on 403, 404,.. errors.
 
 	// Run the connection blocking loop
-	wdprintf(V_DEBUG, "reader", "curl_easy_perform\n");  // ZIPIT DEBUG REMOVE THIS
 	CURLcode res = curl_easy_perform(curl);
-	wdprintf(V_DEBUG, "reader", "curl_easy_perform finished\n");  // ZIPIT DEBUG REMOVE THIS
 
 	if (res == CURLE_HTTP_RETURNED_ERROR) { /* Report 403, 404,.. errors */
 		long http_code = 0;
@@ -241,7 +238,7 @@ static Reader *reader_open_curl(Reader *r, const char *url, int max_redirects)
 	strncpy(r->url, url, sizeof(r->url) - 1);
 	r->url[sizeof(r->url) - 1] = '\0'; // Ensure null-termination
 
-	wdprintf(V_DEBUG, "reader", "curl_reader_thread\n");  // ZIPIT DEBUG REMOVE THIS
+	wdprintf(V_DEBUG, "reader", "curl_reader_thread\n");  
 	assign_signal_handler(SIGPIPE, SIG_IGN);  // avoid termination on socket drops
 	/* Start reader thread... */
 	// NOTE:  512K bytes is well over 10 secs for a 320K bps stream.  Longer for most radio streams.

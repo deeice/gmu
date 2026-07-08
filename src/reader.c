@@ -165,14 +165,12 @@ static Reader *_reader_open(const char *url, int max_redirects)
 
 		r->streaminfo = cfg_init();
 
-		wdprintf(V_DEBUG, "reader", "reader_open\n");  // ZIPIT DEBUG REMOVE THIS
 		if (IS_URL(url)) { /* Got a HTTP URL */
 #ifdef URL_WITH_CURL
 			return reader_open_curl(r, url, max_redirects);
 #else
 			char          *hostname = NULL, *path = NULL;
 			unsigned short port = 80;
-			wdprintf(V_DEBUG, "reader", "http_reader_thread\n");  // ZIPIT DEBUG REMOVE THIS
 			/* open http stream... */
 			/* 1) Split URL into host, port and path */
 			http_url_split_alloc(url, &hostname, &port, &path);
@@ -492,7 +490,6 @@ int reader_read_bytes(Reader *r, size_t size)
 				}
 			}
 		} else {
-			//wdprintf(V_DEBUG, "reader", "reader_read_bytes %d\n", size);  // ZIPIT DEBUG REMOVE THIS
 			while (!read_okay) {
 				pthread_mutex_lock(&(r->mutex));
 				read_okay = ringbuffer_read(&(r->rb_http), r->buf, size);
@@ -502,7 +499,6 @@ int reader_read_bytes(Reader *r, size_t size)
 				r->buf[size] = '\0';
 				if (!read_okay) usleep(150);
 			}
-			//wdprintf(V_DEBUG, "reader", "reader_got_bytes\n", size);  // ZIPIT DEBUG REMOVE THIS
 		}
 	}
 	return read_okay;
