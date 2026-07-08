@@ -244,7 +244,7 @@ static int update_metadata(GmuDecoder *gd, TrackInfo *ti, GmuCharset charset)
 
 #if 1 //ZIPIT_Z2
 			// Change %20 in title to spaces if filename starts with "http://"...
-			if (strncasecmp(ti_tmp.file_name, "http://", 7) == 0) {
+			if (IS_URL(ti_tmp.file_name)) {
 				char *s, *p;
 				if ((p = strrchr(ti_tmp.title,'.'))) // And strip off the extension...
 					*p = 0;

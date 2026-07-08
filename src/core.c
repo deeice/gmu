@@ -1036,12 +1036,12 @@ int main(int argc, char **argv)
 	assign_signal_handler(SIGQUIT, sig_handler);
 	assign_signal_handler(SIGUSR1, sig_handler);
 	assign_signal_handler(SIGUSR2, sig_handler);
+	assign_signal_handler(SIGHUP, sig_handler);
 	//
-	assign_signal_handler(SIGSYS, sig_handler);
-	assign_signal_handler(SIGURG, sig_handler);
-	assign_signal_handler(SIGPOLL, sig_handler);	
+	//assign_signal_handler(SIGURG, sig_handler);
+	//assign_signal_handler(SIGPOLL, sig_handler);	
 #endif
-	
+
 	if (!getcwd(base_dir, 255)) snprintf(base_dir, 255, ".");
 	sys_config_dir = base_dir;
 	config_dir = base_dir;
@@ -1343,13 +1343,16 @@ int main(int argc, char **argv)
 			if (signal_received == SIGQUIT ) gmu_core_play_pause();
 			else if (signal_received == SIGUSR1 ) gmu_core_previous();
 			else if (signal_received == SIGUSR2 ) gmu_core_next();
-			else if (signal_received == SIGSYS ) {
-				wdprintf(V_DEBUG, "gmu", "SIGSYS\n");
+			else if (signal_received == SIGHUP ) {
+				wdprintf(V_DEBUG, "gmu", "SIGHUP\n");
 				gmu_core_info();
 			}
-			else if (signal_received == SIGURG ) wdprintf(V_DEBUG, "gmu", "SIGURG\n");
-			else if (signal_received == SIGPOLL ) wdprintf(V_DEBUG, "gmu", "SIGPOLL\n");
-			else gmu_core_quit();
+			//else if (signal_received == SIGURG ) wdprintf(V_DEBUG, "gmu", "SIGURG\n");
+			//else if (signal_received == SIGPOLL ) wdprintf(V_DEBUG, "gmu", "SIGPOLL\n");
+			else {
+				wdprintf(V_DEBUG, "gmu", "quit signaled %d\n", signal_received);
+				gmu_core_quit();
+			}
 			signal_received = 0;
 		}
 #else
