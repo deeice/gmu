@@ -1,9 +1,9 @@
 /* 
  * Gmu Music Player
  *
- * Copyright (c) 2006-2021 Johannes Heimansberg (wej.k.vu)
+ * Copyright (c) 2006-2026 Johannes Heimansberg (wej.k.vu)
  *
- * File: reader.c  Created: 110406
+ * File: reader_curl.c  Created: 070426
  *
  * Description: File/Stream reader functions
  *
@@ -17,7 +17,24 @@
 // This file is used for reader if URL_WITH_CURL is defined
 #ifdef URL_WITH_CURL
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <signal.h>
+#include "util.h" /* for assign_signal_handler() */
+#include "reader.h"
+#include "reader_curl.h"
+#include "ringbuffer.h"
+#include "debug.h"
+#include "core.h" /* for VERSION_NUMBER and DEFAULT_THREAD_STACK_SIZE */
+#include "pthread_helper.h"
+
 #include <curl/curl.h> // Use tiny-curl lib for https stream support.
+
+extern size_t http_cache_size;           
+extern size_t http_cache_prebuffer_size; 
 
 static size_t gmu_curl_write_callback(void *ptr, size_t size, size_t nmemb, void *userdata) {
 	size_t total_bytes = size * nmemb;
@@ -230,7 +247,7 @@ static void *gmu_curl_reader_thread(void *arg)
 	return NULL;
 }
 
-static Reader *reader_open_curl(Reader *r, const char *url, int max_redirects)
+Reader *reader_open_curl(Reader *r, const char *url, int max_redirects)
 {
 	pthread_cond_init(&(r->cond), NULL);		
 	r->header_end_found = 0;

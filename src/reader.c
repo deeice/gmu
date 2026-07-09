@@ -33,8 +33,15 @@
 #include "core.h" /* for VERSION_NUMBER and DEFAULT_THREAD_STACK_SIZE */
 #include "pthread_helper.h"
 
+#ifdef URL_WITH_CURL
+#include "reader_curl.h"
+
+size_t http_cache_size           = 512 * 1024;
+size_t http_cache_prebuffer_size = 256 * 1024;
+#else
 static size_t http_cache_size           = 512 * 1024;
 static size_t http_cache_prebuffer_size = 256 * 1024;
+#endif
 
 size_t reader_set_cache_size_kb(size_t size, size_t prebuffer_size)
 {
@@ -54,10 +61,7 @@ size_t reader_get_cache_fill(Reader *r)
 	return ringbuffer_get_fill(&(r->rb_http));
 }
 
-#ifdef URL_WITH_CURL
-#include "reader_curl.c"
-#else
-
+#ifndef URL_WITH_CURL
 /* get sockaddr, IPv4 or IPv6 */
 static void *get_in_addr(struct sockaddr *sa)
 {

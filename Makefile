@@ -63,6 +63,9 @@ OBJECTFILES=core.o ringbuffer.o util.o dir.o trackinfo.o playlist.o wejconfig.o 
 ifeq ($(GMU_MEDIALIB),1)
 OBJECTFILES+=medialib.o
 endif
+ifeq ($(GMU_LIBCURL),1)
+OBJECTFILES+=reader_curl.o
+endif
 ifneq ($(GMU_DISABLE_OSS_MIXER),1)
 OBJECTFILES+=oss_mixer.o
 endif
